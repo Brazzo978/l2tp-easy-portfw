@@ -46,10 +46,10 @@ function installQuestions() {
     echo ""
 
     current_second=$(date +%S)
-    default_subnet="10.${current_second}.0.0/24"
+    default_subnet="10.${current_second}.${current_second}.0/24"
 
     read -rp "VPN server IP: " -e -i "$(hostname -I | awk '{print $1}')" VPN_SERVER_IP
-    read -rp "IPsec PSK: " -e -i "mypresharedkey" IPSEC_PSK
+    read -rp "IPsec PSK: " -e -i "iamthepresharedkey" IPSEC_PSK
     read -rp "VPN username: " -e -i "vpnuser" VPN_USER
     read -rp "VPN password: " -e -i "vpnpassword" VPN_PASSWORD
     read -rp "VPN local subnet (e.g., 10.x.x.0/24): " -e -i "$default_subnet" VPN_SUBNET
