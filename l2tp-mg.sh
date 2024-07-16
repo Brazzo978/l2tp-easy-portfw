@@ -45,11 +45,14 @@ function installQuestions() {
     echo "You can keep the default options and just press enter if you are ok with them."
     echo ""
 
+    current_second=$(date +%S)
+    default_subnet="10.${current_second}.0.0/24"
+
     read -rp "VPN server IP: " -e -i "$(hostname -I | awk '{print $1}')" VPN_SERVER_IP
     read -rp "IPsec PSK: " -e -i "mypresharedkey" IPSEC_PSK
     read -rp "VPN username: " -e -i "vpnuser" VPN_USER
     read -rp "VPN password: " -e -i "vpnpassword" VPN_PASSWORD
-    read -rp "VPN local subnet (e.g., 192.168.42.0/24): " -e -i "192.168.42.0/24" VPN_SUBNET
+    read -rp "VPN local subnet (e.g., 10.x.x.0/24): " -e -i "$default_subnet" VPN_SUBNET
 }
 
 function installL2TP() {
@@ -129,15 +132,30 @@ EOF
 
     sysctl --system
 
-    iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-    iptables-save > /etc/iptables.rules
-
-    cat > /etc/network/if-up.d/iptables <<EOF
+    cat > /etc/l2tp_vpn_iptables.sh <<EOF
 #!/bin/sh
-iptables-restore < /etc/iptables.rules
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+# Add any additional iptables rules here
 EOF
 
-    chmod +x /etc/network/if-up.d/iptables
+    chmod +x /etc/l2tp_vpn_iptables.sh
+
+    cat > /etc/systemd/system/l2tp-iptables.service <<EOF
+[Unit]
+Description=Apply iptables rules for L2TP/IPsec
+After=strongswan.service xl2tpd.service
+
+[Service]
+Type=oneshot
+ExecStart=/etc/l2tp_vpn_iptables.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable l2tp-iptables.service
+    systemctl start l2tp-iptables.service
 
     systemctl enable strongswan
     systemctl enable xl2tpd
@@ -154,14 +172,26 @@ function addClient() {
 
     echo "$VPN_USER * $VPN_PASSWORD *" >> /etc/ppp/chap-secrets
 
+    # Create client configuration file
+    cat > /root/${VPN_USER}_l2tp_client.conf <<EOF
+VPN Server IP: $VPN_SERVER_IP
+IPsec PSK: $IPSEC_PSK
+Username: $VPN_USER
+Password: $VPN_PASSWORD
+EOF
+
     systemctl restart strongswan xl2tpd
     echo -e "${GREEN}Client added successfully.${NC}"
+    echo -e "${GREEN}Client configuration saved to /root/${VPN_USER}_l2tp_client.conf${NC}"
 }
 
 function removeClient() {
     read -rp "VPN username to remove: " VPN_USER
 
     sed -i "/^$VPN_USER /d" /etc/ppp/chap-secrets
+
+    # Remove client configuration file
+    rm -f /root/${VPN_USER}_l2tp_client.conf
 
     systemctl restart strongswan xl2tpd
     echo -e "${GREEN}Client removed successfully.${NC}"
